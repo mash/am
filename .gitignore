@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+*.xcodeproj
+.DS_Store
+
+# Private planning/research docs — kept local, never pushed to the public repo.
+docs/plans/
