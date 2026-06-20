@@ -19,7 +19,8 @@ From source:
 ```sh
 git clone https://github.com/mash/fm
 cd fm
-make install            # installs to /usr/local; override with PREFIX=~/.local
+make install                  # installs to /usr/local (needs sudo)
+make install PREFIX=$HOME/.local   # or a sudo-free prefix on your PATH
 ```
 
 ## Usage
