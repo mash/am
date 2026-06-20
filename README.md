@@ -1,24 +1,24 @@
-# fm
+# am
 
 Run Apple's on-device Foundation Model from the command line. Pipe in a prompt, get a completion back. No API key, no billing, no network: the device runs everything.
 
 ## Requirements
 
 - macOS 26 or later, Apple Silicon
-- Apple Intelligence enabled (check with `fm check`)
-- Xcode or the Swift toolchain to build (`fm tokens` needs macOS 26.4)
+- Apple Intelligence enabled (check with `am check`)
+- Xcode or the Swift toolchain to build (`am tokens` needs macOS 26.4)
 
 ## Install
 
 ```sh
-brew install mash/tap/fm
+brew install mash/tap/am
 ```
 
 From source:
 
 ```sh
-git clone https://github.com/mash/fm
-cd fm
+git clone https://github.com/mash/am
+cd am
 make install                  # installs to /usr/local (needs sudo)
 make install PREFIX=$HOME/.local   # or a sudo-free prefix on your PATH
 ```
@@ -27,44 +27,44 @@ make install PREFIX=$HOME/.local   # or a sudo-free prefix on your PATH
 
 ```sh
 # from stdin
-echo "Explain a monad in one sentence." | fm
+echo "Explain a monad in one sentence." | am
 
 # from an argument
-fm "What is 2+2? Answer with just the number."
+am "What is 2+2? Answer with just the number."
 
 # with system instructions
-fm -s "You are a terse cook." "How do I keep pasta from sticking?"
+am -s "You are a terse cook." "How do I keep pasta from sticking?"
 
 # full detail as JSON, for programs
-echo "Name one primary color." | fm --json
+echo "Name one primary color." | am --json
 # {"content":"Red ...","ok":true,"tokens":{"prompt":14,"window":4096}}
 
 # stream tokens as they arrive
-fm --stream "Write a haiku about the sea."
+am --stream "Write a haiku about the sea."
 
 # interactive session that keeps context
-fm repl
+am repl
 ```
 
 Generation is the default. The other operations are subcommands: `repl`, `check`, `tokens`, and `batch`. A subcommand is only recognized as the first argument; otherwise the first argument is treated as the prompt.
 
 ```sh
-fm [prompt]            # generate (default; prompt from arg or stdin)
-fm repl                # interactive REPL (requires a terminal)
-fm check               # model availability
-fm tokens [prompt]     # prompt token count vs window
-fm batch               # NDJSON in/out
+am [prompt]            # generate (default; prompt from arg or stdin)
+am repl                # interactive REPL (requires a terminal)
+am check               # model availability
+am tokens [prompt]     # prompt token count vs window
+am batch               # NDJSON in/out
 ```
 
-Running `fm` with no prompt in a terminal prints help and exits 64; with an empty pipe it exits 64 with `fm: empty prompt`.
+Running `am` with no prompt in a terminal prints help and exits 64; with an empty pipe it exits 64 with `am: empty prompt`.
 
 ### REPL
 
-`fm repl` opens an interactive session that keeps conversational context across turns and streams each reply as it arrives. It requires a terminal. Type `exit`, `quit`, or press Ctrl-D to end; `/reset` clears the context.
+`am repl` opens an interactive session that keeps conversational context across turns and streams each reply as it arrives. It requires a terminal. Type `exit`, `quit`, or press Ctrl-D to end; `/reset` clears the context.
 
 ```sh
-fm repl
-# fm — interactive. Ctrl-D or `exit` to quit, `/reset` to clear context.
+am repl
+# am — interactive. Ctrl-D or `exit` to quit, `/reset` to clear context.
 # > Name a primary color. One word.
 # Red.
 # > And another?
@@ -74,8 +74,8 @@ fm repl
 ### Options
 
 ```
-fm [options] [prompt]
-fm <command> [options] [prompt]
+am [options] [prompt]
+am <command> [options] [prompt]
 
 Commands:
   repl                    interactive session; keeps context, streams replies
@@ -104,12 +104,12 @@ Generation:
 
 ### Batch
 
-`fm batch` reads NDJSON from stdin, runs one request per line, and prints one JSON result per line. It reuses a single process and a warmed model across every request, so a large run pays process startup and model load only once.
+`am batch` reads NDJSON from stdin, runs one request per line, and prints one JSON result per line. It reuses a single process and a warmed model across every request, so a large run pays process startup and model load only once.
 
 ```sh
 printf '%s\n' \
   '{"id":"a","prompt":"Name a primary color. One word."}' \
-  '{"id":"b","prompt":"2+2? Number only.","system":"You are terse."}' | fm batch
+  '{"id":"b","prompt":"2+2? Number only.","system":"You are terse."}' | am batch
 # {"content":"Red.","id":"a","ok":true}
 # {"content":"4","id":"b","ok":true}
 ```
@@ -118,7 +118,7 @@ Each line takes a string `prompt` and optional `system` and `id`. The `-s`, `-t`
 
 ### Exit codes
 
-`fm` returns the result kind as an exit code, so a caller can branch on it without parsing JSON.
+`am` returns the result kind as an exit code, so a caller can branch on it without parsing JSON.
 
 | code | meaning |
 |---|---|
@@ -136,19 +136,19 @@ Each line takes a string `prompt` and optional `system` and `id`. The `-s`, `-t`
 
 ## Limits
 
-- The context window holds 4096 tokens, input and output combined. Larger input exits with code 4. Measure it first with `fm tokens`.
+- The context window holds 4096 tokens, input and output combined. Larger input exits with code 4. Measure it first with `am tokens`.
 - The on-device model is a shared, serial resource. Parallel requests — across processes or sessions — do not raise throughput.
 - The model leans toward English. To pin the output language, say so in `-s`.
 
-## Calling fm from other programs
+## Calling am from other programs
 
-`fm` follows a plain stdin/stdout/exit-code contract, so any language can run it as a subprocess. In Go:
+`am` follows a plain stdin/stdout/exit-code contract, so any language can run it as a subprocess. In Go:
 
 ```go
-cmd := exec.Command("fm", "-s", systemPrompt, "--json")
+cmd := exec.Command("am", "-s", systemPrompt, "--json")
 cmd.Stdin = strings.NewReader(userPrompt)
 out, _ := cmd.Output()
 // branch on the exit code; read detail from --json
 ```
 
-For many requests, prefer `fm batch`: write one JSON object per line to the process, read one result per line.
+For many requests, prefer `am batch`: write one JSON object per line to the process, read one result per line.

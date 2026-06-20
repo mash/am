@@ -1,13 +1,13 @@
-# Homebrew formula for `fm`.
+# Homebrew formula for `am`.
 #
 # Canonical copy lives here; the tap (github.com/mash/homebrew-tap) installs a
-# copy of this file under its Formula/ dir so `brew install mash/tap/fm` works.
+# copy of this file under its Formula/ dir so `brew install mash/tap/am` works.
 # Head-only until the first tagged release — then add a `url`/`sha256` stable
 # stanza pointing at the release tarball.
-class Fm < Formula
+class Am < Formula
   desc "Apple on-device Foundation Model from the command line"
-  homepage "https://github.com/mash/fm"
-  head "https://github.com/mash/fm.git", branch: "main"
+  homepage "https://github.com/mash/am"
+  head "https://github.com/mash/am.git", branch: "main"
   license "MIT"
 
   depends_on :macos
@@ -15,10 +15,10 @@ class Fm < Formula
 
   def install
     system "swift", "build", "--disable-sandbox", "-c", "release"
-    bin.install ".build/release/fm"
+    bin.install ".build/release/am"
   end
 
   test do
-    assert_match "fm", shell_output("#{bin}/fm --version")
+    assert_match "am", shell_output("#{bin}/am --version")
   end
 end

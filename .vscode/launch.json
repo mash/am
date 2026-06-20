@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:fm}",
+            "name": "Debug am",
+            "target": "am",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug am"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:fm}",
+            "name": "Release am",
+            "target": "am",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release am"
+        }
+    ]
+}
