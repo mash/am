@@ -39,7 +39,10 @@ func emitJSON(_ obj: [String: Any]) {
   FileHandle.standardOutput.write("\n".data(using: .utf8)!)
 }
 
+enum Command { case complete, repl, check, tokens, batch }
+
 struct Options {
+  var command: Command = .complete
   var system: String? = nil
   var prompt: String? = nil
   var json = false
@@ -47,18 +50,28 @@ struct Options {
   var maxTokens: Int? = nil
   var greedy = false
   var seed: UInt64? = nil
-  var countTokens = false
-  var check = false
   var stream = false
-  var batch = false
 }
 
 let HELP = """
 fm — Apple on-device Foundation Model, from the command line.
 
 USAGE:
-  fm [options] [prompt]
+  fm [options] [prompt]            generate (default; prompt from arg or stdin)
+  fm <command> [options] [prompt]
   echo "prompt" | fm [options]
+
+COMMANDS:
+  repl                    interactive session; keeps context, streams replies
+                          (requires a terminal)
+  check                   print model availability and exit (0 ok / 3 unavailable)
+  tokens [prompt]         print prompt token count vs window (\(WINDOW)); no generation
+                          (requires macOS 26.4)
+  batch                   read NDJSON from stdin, one request per line, emit one
+                          JSON result per line. Reuses the process and warmed
+                          model across all requests. Each line:
+                            {"prompt": "...", "system": "...", "id": "..."}
+                          (system/id optional; -s/-t/-m flags apply to all lines)
 
 INPUT:
   [prompt]                user prompt; read from stdin if omitted
@@ -70,22 +83,12 @@ OUTPUT:
       --json              full structured JSON (content, tokens, error detail)
       --stream            stream completion tokens to stdout as they arrive (plain text)
 
-BATCH:
-      --batch             read NDJSON from stdin, one request per line, emit one
-                          JSON result per line. Reuses the process and warmed
-                          model across all requests. Each line:
-                            {"prompt": "...", "system": "...", "id": "..."}
-                          (system/id optional; -s/-t/-m flags apply to all lines)
-
 GENERATION:
   -t, --temperature <f>   sampling temperature
   -m, --max-tokens <n>    maximum response tokens
       --greedy            deterministic (greedy) sampling
       --seed <n>          random-sampling seed
 
-UTILITY:
-      --count-tokens      print prompt token count vs window (\(WINDOW)); no generation
-      --check             print model availability and exit (0 ok / 3 unavailable)
   -h, --help
   -V, --version
 
@@ -99,7 +102,16 @@ func parseArgs() -> Options {
   var o = Options()
   var positional: [String] = []
   var systemFile: String? = nil
-  let args = Array(CommandLine.arguments.dropFirst())
+  var args = Array(CommandLine.arguments.dropFirst())
+  if let first = args.first {
+    switch first {
+    case "repl":   o.command = .repl;   args.removeFirst()
+    case "check":  o.command = .check;  args.removeFirst()
+    case "tokens": o.command = .tokens; args.removeFirst()
+    case "batch":  o.command = .batch;  args.removeFirst()
+    default: break
+    }
+  }
   var i = 0
   func value(_ flag: String) -> String {
     i += 1
@@ -118,10 +130,7 @@ func parseArgs() -> Options {
     case "-m", "--max-tokens": o.maxTokens = Int(value(a))
     case "--greedy": o.greedy = true
     case "--seed": o.seed = UInt64(value(a))
-    case "--count-tokens": o.countTokens = true
-    case "--check": o.check = true
     case "--stream": o.stream = true
-    case "--batch": o.batch = true
     case "--": i += 1; while i < args.count { positional.append(args[i]); i += 1 }; continue
     default:
       if a.hasPrefix("-") && a != "-" { die("fm: unknown option \(a)", .usage) }
@@ -139,6 +148,10 @@ func parseArgs() -> Options {
 
 func readPrompt(_ o: Options) -> String {
   if let p = o.prompt { return p }
+  // No prompt arg on a TTY: don't block on readDataToEndOfFile (which would hang
+  // until the user sends EOF). Return empty and let the caller's guard branch on
+  // isatty → help / non-TTY → "empty prompt".
+  if isatty(STDIN_FILENO) != 0 { return "" }
   let data = FileHandle.standardInput.readDataToEndOfFile()
   return String(data: data, encoding: .utf8) ?? ""
 }
@@ -175,7 +188,7 @@ struct FM {
     // --- availability ---
     switch SystemLanguageModel.default.availability {
     case .available:
-      if o.check {
+      if o.command == .check {
         if o.json { emitJSON(["ok": true, "available": true]) } else { print("available") }
         exit(0)
       }
@@ -187,13 +200,26 @@ struct FM {
     }
 
     // --- batch mode: NDJSON in/out, one process for all requests ---
-    if o.batch { await runBatch(o); exit(0) }
+    if o.command == .batch { await runBatch(o); exit(0) }
+
+    // --- interactive REPL ---
+    if o.command == .repl {
+      guard isatty(STDIN_FILENO) != 0 else { die("fm: repl requires a terminal", .usage) }
+      await runREPL(o); exit(0)
+    }
 
     let prompt = readPrompt(o)
+    if o.prompt == nil && prompt.isEmpty {
+      // tokens needs a prompt; report that rather than generic help / empty-prompt
+      if o.command == .tokens { die("fm: tokens requires a prompt", .usage) }
+      // no args: TTY → help, non-TTY (empty pipe) → error
+      if isatty(STDIN_FILENO) != 0 { print(HELP); exit(Exit.usage.rawValue) }
+      die("fm: empty prompt", .usage)
+    }
     let session = LanguageModelSession(instructions: o.system)
 
     // --- token counting mode ---
-    if o.countTokens {
+    if o.command == .tokens {
       guard let n = await countTokens(prompt) else {
         die("fm: token counting requires macOS 26.4+", .error)
       }
@@ -271,6 +297,51 @@ struct FM {
     if let r = e.recoverySuggestion { fields["recoverySuggestion"] = r }
     if let x = refusalExplanation { fields["refusalExplanation"] = x }
     return (kind, code, fields)
+  }
+
+  // Interactive REPL (`fm repl`). One persistent session keeps conversational
+  // context across turns; responses stream token-by-token. Ctrl-D (EOF), `exit`,
+  // or `quit` ends the loop; `/reset` clears context. Banner/notices go to stderr
+  // so stdout stays pure model output.
+  static func runREPL(_ o: Options) async {
+    FileHandle.standardError.write(
+      "fm — interactive. Ctrl-D or `exit` to quit, `/reset` to clear context.\n".data(using: .utf8)!)
+    var session = LanguageModelSession(instructions: o.system)
+    while true {
+      FileHandle.standardOutput.write("> ".data(using: .utf8)!)
+      guard let line = readLine(strippingNewline: true) else {
+        FileHandle.standardOutput.write("\n".data(using: .utf8)!); break  // EOF
+      }
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      if trimmed.isEmpty { continue }
+      if trimmed == "exit" || trimmed == "quit" { break }
+      if trimmed == "/reset" {
+        session = LanguageModelSession(instructions: o.system)
+        FileHandle.standardError.write("(context cleared)\n".data(using: .utf8)!); continue
+      }
+      do {
+        let stream = session.streamResponse(to: line, options: makeOptions(o))
+        var printed = 0
+        for try await snapshot in stream {
+          let s = snapshot.content
+          if s.count > printed {
+            let start = s.index(s.startIndex, offsetBy: printed)
+            FileHandle.standardOutput.write(String(s[start...]).data(using: .utf8)!)
+            printed = s.count
+          }
+        }
+        FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+      } catch let e as LanguageModelSession.GenerationError {
+        // Report but DON'T exit — keep the REPL alive.
+        let (kind, _, fields) = await errorInfo(e)
+        var msg = "fm: \(kind)"
+        if let d = fields["errorDescription"] as? String { msg += ": \(d)" }
+        if case .exceededContextWindowSize = e { msg += "  (try /reset)" }
+        FileHandle.standardError.write((msg + "\n").data(using: .utf8)!)
+      } catch {
+        FileHandle.standardError.write("fm: \(error)\n".data(using: .utf8)!)
+      }
+    }
   }
 
   // Reads NDJSON lines from stdin, processes each in this same process (so the
