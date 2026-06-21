@@ -6,12 +6,12 @@ Run Apple's on-device Foundation Model from the command line. Pipe in a prompt, 
 
 - macOS 26 or later, Apple Silicon
 - Apple Intelligence enabled (check with `am check`)
-- Xcode or the Swift toolchain to build (`am tokens` needs macOS 26.4)
+- Xcode or the Swift toolchain to build
 
 ## Install
 
 ```sh
-brew install mash/tap/am
+brew install --HEAD mash/tap/am   # builds from source; needs Xcode
 ```
 
 From source:
@@ -92,6 +92,7 @@ Output:
   (default)               completion text on stdout
       --json              full JSON: content, tokens, and error detail
       --stream            stream tokens to stdout as they arrive (plain text)
+                          (--json implies buffered output and takes precedence)
 
 Generation:
   -t, --temperature <f>   sampling temperature
